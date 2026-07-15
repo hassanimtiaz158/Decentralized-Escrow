@@ -1,57 +1,70 @@
-# Sample Hardhat 3 Project (`mocha` and `ethers`)
+# Escrow Ledger — Decentralized Freelance Escrow
 
-This project showcases a Hardhat 3 project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+A trust-minimized escrow smart contract for freelance engagements, plus a live React dashboard that talks to it directly from MetaMask. Funds are locked in the contract the moment a job is created and only released, refunded, or split by dispute resolution — there is no middleman holding funds.
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+**TL;DR for skimmers:** Solidity + React, deployed on Sepolia, real MetaMask interactions, real-time on-chain event updates, written with security-first Solidity patterns and a full Hardhat test suite.
 
-## Project Overview
+---
 
-This example project includes:
+## What it does
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+- **Create & fund a job** in one tx — client sends ETH, contract holds it (`createJob`, payable).
+- **Deliver → Release**: freelancer marks delivered, client releases funds straight to the freelancer.
+- **Disputes**: client raises a dispute, a trusted arbitrator splits the funds by basis points (`resolveDispute`).
+- **Autonomous exits** that don't need the arbitrator:
+  - client `refundIfExpired` after the deadline passes with no delivery,
+  - freelancer `claimIfUnresponsive` after a grace period if the client ghosts a delivered job.
+- **Live dashboard**: a React/Vite app reads job state from chain, signs actions via MetaMask, and **updates in real time** by listening to contract events (`JobCreated`, `JobDelivered`, `JobReleased`, `JobDisputed`, `JobResolved`, `JobRefunded`) — no polling, no refresh button.
 
-## Usage
+## Tech stack
 
-### Running Tests
+| Layer | Tech |
+|------|------|
+| Smart contract | Solidity 0.8.28, OpenZeppelin Contracts v5 (`ReentrancyGuard`) |
+| Tooling / tests | Hardhat 3 (Ignition deploy, ethers v6), Mocha + ethers integration tests, Foundry-style unit tests |
+| Frontend | React 18 + Vite, ethers v6, MetaMask (`window.ethereum`) |
+| Network | Sepolia testnet |
 
-To run all the tests in the project, execute the following command:
+## Why these design decisions
+
+- **Checks–Effects–Interactions, everywhere.** In every fund-moving function (`releaseFunds`, `resolveDispute`, `refundIfExpired`, `claimIfUnresponsive`) the job's status is updated *before* the external `.call(){value:}` transfer. State is committed before any external code runs, which is the primary defense against reentrancy.
+- **`ReentrancyGuard` on all state-changing functions** as a belt-and-suspenders backstop, with NatSpec documenting the security intent on each function.
+- **Fail-fast access control via modifiers** (`onlyClient`, `onlyFreelancer`, `onlyArbitrator`, `onlyWhenStatus`). Callers can't act out of turn or out of role; invalid calls revert with a clear reason string.
+- **Events on every state transition.** The contract is the source of truth; the UI never trusts local state. Events let the dashboard (and any off-chain indexer) stay in sync by simply subscribing, which is why updates are instant.
+- **Single trusted arbitrator, set once at deploy** (`constructor(address arbitrator_)`).
+  - *Known v1 limitation:* this is a centralization/trust assumption. It keeps v1 simple and is appropriate for a demo, but a production system would graduate to a multisig, a curated arbitrator set, or an upgradeable governance-controlled arbitrator. Flagged honestly as a trade-off, not hidden.
+- **Deadline + `GRACE_PERIOD`** drive the two autonomous exit paths above, reducing how often the arbitrator is actually needed.
+
+## Links
+
+- **Live demo:** https://<your-demo-url>  *(replace with the deployed Vercel/Netlify URL)*
+- **Deployed contract (Sepolia Etherscan):** https://sepolia.etherscan.io/address/<YOUR_CONTRACT_ADDRESS>  *(replace with the deployed address)*
+
+## Run it locally
+
+**Prerequisites:** Node 18+, [Foundry](https://book.getfoundry.sh) (optional, for the Solidity unit tests), MetaMask, and Sepolia test ETH.
 
 ```shell
+# 1. Install
+npm install
+
+# 2. Compile
+npx hardhat compile
+
+# 3. Run the test suite
 npx hardhat test
+
+# 4. Deploy to Sepolia (needs SEPOLIA_RPC_URL + SEPOLIA_PRIVATE_KEY)
+npx hardhat ignition deploy --network sepolia ignition/modules/Escrow.ts
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+**Dashboard:**
 
 ```shell
-npx hardhat test solidity
-npx hardhat test mocha
+cd escrow-dashboard
+npm install
+cp .env.example .env      # set VITE_APP_CONTRACT_ADDRESS + VITE_APP_SEPOLIA_RPC_URL
+npm run dev                 # open the printed localhost URL, connect MetaMask on Sepolia
 ```
 
-### Make a deployment to Sepolia
-
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
-
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+> The contract address currently referenced in the UI is a placeholder. Point `VITE_APP_CONTRACT_ADDRESS` at your deployed instance to make it fully live.

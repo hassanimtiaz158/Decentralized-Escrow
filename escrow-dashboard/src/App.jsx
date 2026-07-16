@@ -149,8 +149,14 @@ function App() {
 
   const createJob = async () => {
     const { title, freelancer, amount, deadline } = newJobForm;
-    if (!title || !freelancer || !amount || !deadline) {
-      alert('Fill in a title, freelancer address, amount, and deadline.');
+    const missing = [
+      !title && 'title',
+      !freelancer && 'freelancer address',
+      !amount && 'amount',
+      !deadline && 'deadline',
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      alert('Missing: ' + missing.join(', ') + '.');
       return;
     }
     if (!ethers.isAddress(freelancer)) {
